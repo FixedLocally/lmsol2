@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::*;
 use anchor_lang::solana_program::program::*;
 use anchor_lang::solana_program::instruction::*;
+use anchor_lang::solana_program::system_instruction::create_account;
 use marinade::*;
 // use mango::instruction::MangoInstruction;
 // use alloc::collections::btree_map::BTreeMap;
@@ -26,7 +27,10 @@ pub mod lmsol2 {
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         msg!("{}", ctx.accounts.marinade_state.msol_price);
-        return ctx.accounts.process(*ctx.bumps.get("lmsol_state").unwrap());
+        return ctx.accounts.process(
+            *ctx.bumps.get("lmsol_state").unwrap(),
+            *ctx.bumps.get("lmsol_mint").unwrap(),
+        );
         // Err(error!(Errors::NoError))
     }
 
@@ -43,30 +47,35 @@ pub struct Initialize<'info> {
     system_program: Program<'info, System>,
     mango_program: Program<'info, MangoV3>,
     token_program: Program<'info, Token>,
-    marinade_state: Account<'info, State>,
+    marinade_state: Box<Account<'info, State>>,
     #[account(
         init, payer = signer, space = LmSolState::LEN,
         seeds = [LmSolState::SEED], bump
     )]
     lmsol_state: Box<Account<'info, LmSolState>>,
+    sysvar_rent: Sysvar<'info, Rent>,
     /// CHECK: mango accounts are not anchor accounts
     #[account(mut, owner = MANGO_V3_ID_DEVNET)]
     mango_group: AccountInfo<'info>,
     /// CHECK: mango accounts are not anchor accounts
     #[account(mut)]
     mango_account: AccountInfo<'info>,
+    /// CHECK: we are going to init the mint ourselves
+    #[account(mut, seeds = [LmSolState::MINT_SEED], bump)]
+    lmsol_mint: AccountInfo<'info>,
 }
 
 impl <'info>Initialize<'info> {
-    pub fn process(&mut self, state_bump: u8) -> Result<()>{
+    pub fn process(&mut self, state_bump: u8, mint_bump: u8) -> Result<()>{
         // init state and set accounts
         self.lmsol_state.mango_group = *self.mango_group.key;
         self.lmsol_state.mango_program = *self.mango_program.key;
         self.lmsol_state.marinade_state = self.marinade_state.key();
         self.lmsol_state.owner = self.signer.key();
         self.lmsol_state.mango_account = *self.mango_account.key;
+        self.lmsol_state.lmsol_mint = self.lmsol_mint.key();
         self.lmsol_state.bump = state_bump;
-        // self.lmsol_state.ac;
+        self.lmsol_state.mint_bump = mint_bump;
 
         // create mango account
         let mango_program = &self.mango_program;
@@ -98,6 +107,39 @@ impl <'info>Initialize<'info> {
         }
 
         // create token mint
+        msg!("allocate token mint");
+        let allocate_mint_ix = create_account(
+            &self.signer.key(),
+            self.lmsol_mint.key,
+            self.sysvar_rent.minimum_balance(Mint::LEN),
+            Mint::LEN as u64,
+            &self.token_program.key(),
+        );
+        let allocate_result = invoke_signed(&allocate_mint_ix, &[
+            self.signer.to_account_infos()[0].clone(),
+            self.lmsol_mint.to_account_infos()[0].clone(),
+            self.token_program.to_account_infos()[0].clone(),
+        ], &[&[LmSolState::MINT_SEED, &[mint_bump]]]);
+        match allocate_result  {
+            Ok(_) => {},
+            Err(e) => panic!("{}", e)
+        }
+        msg!("create token mint");
+        let create_mint_ix = spl_token::instruction::initialize_mint(
+            &self.token_program.key(),
+            self.lmsol_mint.key,
+            &self.lmsol_state.key(),
+            None, 9)?;
+        let init_mint_result = invoke(&create_mint_ix, &[
+            // self.token_program.to_account_infos()[0].clone(),
+            self.lmsol_mint.clone(),
+            // self.lmsol_state.to_account_infos()[0].clone(),
+            self.sysvar_rent.to_account_infos()[0].clone(),
+        ]);
+        match init_mint_result  {
+            Ok(_) => {},
+            Err(e) => panic!("{}", e)
+        }
         Ok(())
     }
 
