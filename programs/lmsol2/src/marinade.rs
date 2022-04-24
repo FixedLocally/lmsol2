@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
 use std::{
     fmt::Display,
-    mem::MaybeUninit,
 };
 
 pub static MARINADE_ID: Pubkey = Pubkey::new_from_array([
@@ -57,25 +56,6 @@ pub struct State {
     pub emergency_cooling_down: u64,
 }
 
-impl State {
-    pub const PRICE_DENOMINATOR: u64 = 0x1_0000_0000;
-    /// Suffix for reserve account seed
-    pub const RESERVE_SEED: &'static [u8] = b"reserve";
-    pub const MSOL_MINT_AUTHORITY_SEED: &'static [u8] = b"st_mint";
-
-    // Account seeds for simplification of creation (optional)
-    pub const STAKE_LIST_SEED: &'static str = "stake_list";
-    pub const VALIDATOR_LIST_SEED: &'static str = "validator_list";
-
-    pub fn serialized_len() -> usize {
-        unsafe { MaybeUninit::<Self>::zeroed().assume_init() }
-            .try_to_vec()
-            .unwrap()
-            .len()
-            + 8
-    }
-}
-
 impl anchor_lang::Owner for State {
     fn owner() -> Pubkey {
         // pub use spl_token::ID is used at the top of the file
@@ -113,13 +93,6 @@ pub struct LiqPool {
     pub liquidity_sol_cap: u64,
 }
 
-impl LiqPool {
-    pub const LP_MINT_AUTHORITY_SEED: &'static [u8] = b"liq_mint";
-    pub const SOL_LEG_SEED: &'static [u8] = b"liq_sol";
-    pub const MSOL_LEG_AUTHORITY_SEED: &'static [u8] = b"liq_st_sol_authority";
-    pub const MSOL_LEG_SEED: &'static str = "liq_st_sol";
-}
-
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, AnchorSerialize, AnchorDeserialize)]
 pub struct StakeRecord {
@@ -127,19 +100,6 @@ pub struct StakeRecord {
     pub last_update_delegated_lamports: u64,
     pub last_update_epoch: u64,
     pub is_emergency_unstaking: u8, // 1 for cooling down after emergency unstake, 0 otherwise
-}
-
-impl StakeRecord {
-    pub const DISCRIMINATOR: &'static [u8; 8] = b"staker__";
-
-    pub fn new(stake_account: &Pubkey, delegated_lamports: u64, clock: &Clock) -> Self {
-        Self {
-            stake_account: *stake_account,
-            last_update_delegated_lamports: delegated_lamports,
-            last_update_epoch: clock.epoch,
-            is_emergency_unstaking: 0,
-        }
-    }
 }
 
 #[derive(Clone, AnchorSerialize, AnchorDeserialize, Debug)]
@@ -163,11 +123,6 @@ pub struct StakeSystem {
     pub extra_stake_delta_runs: u32,
 }
 
-impl StakeSystem {
-    pub const STAKE_WITHDRAW_SEED: &'static [u8] = b"withdraw";
-    pub const STAKE_DEPOSIT_SEED: &'static [u8] = b"deposit";
-}
-
 #[derive(Clone, AnchorSerialize, AnchorDeserialize, Debug)]
 pub struct List {
     pub account: Pubkey,
@@ -176,26 +131,6 @@ pub struct List {
     // For chunked change account
     pub new_account: Pubkey,
     pub copied_count: u32,
-}
-
-impl List {
-}
-
-
-pub struct ValidatorRecord {
-    /// Validator vote pubkey
-    pub validator_account: Pubkey,
-
-    /// Validator total balance in lamports
-    pub active_balance: u64, // must be 0 for removing
-    pub score: u32,
-    pub last_stake_delta_epoch: u64,
-    pub duplication_flag_bump_seed: u8,
-}
-
-impl ValidatorRecord {
-    pub const DISCRIMINATOR: &'static [u8; 8] = b"validatr";
-    pub const DUPLICATE_FLAG_SEED: &'static [u8] = b"unique_validator";
 }
 
 #[derive(Clone, AnchorSerialize, AnchorDeserialize, Debug)]
@@ -220,11 +155,5 @@ pub struct Fee {
 impl Display for Fee {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}%", self.basis_points as f32 / 100.0)
-    }
-}
-
-impl Fee {
-    pub fn from_basis_points(basis_points: u32) -> Self {
-        Self { basis_points }
     }
 }

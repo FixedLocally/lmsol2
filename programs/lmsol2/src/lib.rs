@@ -140,12 +140,15 @@ impl <'info>KillState<'info> {
         if self.lmsol_state.owner != self.signer.key() {
             return Err(error!(Errors::IncorrectStateOwner))
         }
+        // disallow touching mango accounts not owned by this state
         if self.lmsol_state.mango_account != *self.mango_account.key {
             return Err(error!(Errors::IncorrectMangoAccountOwner))
         }
+        // disallow wrong mango programs
         if self.lmsol_state.mango_program != self.mango_program.key() {
             return Err(error!(Errors::IncorrectProgram))
         }
+        // disallow wrong mango groups
         if self.lmsol_state.mango_group != self.mango_group.key() {
             return Err(error!(Errors::IncorrectProgram))
         }
