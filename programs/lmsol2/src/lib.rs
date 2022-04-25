@@ -3,6 +3,7 @@ use anchor_spl::token::*;
 use anchor_lang::solana_program::program::*;
 use anchor_lang::solana_program::instruction::*;
 use anchor_lang::solana_program::system_instruction::create_account;
+use fixed::types::I80F48;
 use marinade::*;
 // use mango::instruction::MangoInstruction;
 // use alloc::collections::btree_map::BTreeMap;
@@ -13,7 +14,7 @@ mod marinade;
 
 use ext::*;
 use state::*;
-use mango::state::{MangoAccount, MangoGroup, MAX_PAIRS};
+use mango::state::{MangoAccount, MangoGroup, MangoCache};
 
 declare_id!("DZV3G6oZw2Qebc7QdcgbC59bKMaaLk9pnBZSXWpG64fd");
 
@@ -230,12 +231,16 @@ impl <'info>KillState<'info> {
 
 #[derive(Accounts)]
 pub struct ReadMangoAccount<'info> {
+    marinade_state: Box<Account<'info, State>>,
     /// CHECK: mango accounts are not anchor accounts
     #[account(mut, owner = MANGO_V3_ID)]
     mango_account: AccountInfo<'info>,
     /// CHECK: mango accounts are not anchor accounts
     #[account(mut, owner = MANGO_V3_ID)]
     mango_group: AccountInfo<'info>,
+    /// CHECK: mango accounts are not anchor accounts
+    #[account(mut, owner = MANGO_V3_ID)]
+    mango_cache: AccountInfo<'info>,
 }
 
 impl <'info>ReadMangoAccount<'info> {
@@ -252,15 +257,26 @@ impl <'info>ReadMangoAccount<'info> {
         }
         let ac = mango_ac_result.unwrap();
         let group = mango_group_result.unwrap();
-
-        msg!("mango group {}", ac.mango_group);
-        msg!("mango deposits {:?}", ac.deposits);
-        msg!("mango borrows {:?}", ac.borrows);
-        for i in 0..MAX_PAIRS {
-            msg!("mango spot {:?}", group.spot_markets[i].spot_market);
-            msg!("mango perp {:?}", group.perp_markets[i].perp_market);
+        let cache_result = MangoCache::load_checked(&self.mango_cache, &MANGO_V3_ID, &group);
+        match cache_result {
+            Ok(_) => {}
+            Err(e) => {panic!("{}", e)}
         }
-        
+        let cache = cache_result.unwrap();
+
+        let msol_index = group.find_token_index(&MSOL_MINT).unwrap();
+        let sol_index = group.find_token_index(&SOL_MINT).unwrap();
+        msg!("mango group {}", ac.mango_group);
+        msg!("mango deposits {:?} mSOL", ac.deposits[msol_index]);
+        msg!("mango borrows {:?} SOL", ac.borrows[sol_index]);
+        msg!("msol deposit idx {}", cache.root_bank_cache[msol_index].deposit_index);
+        msg!("sol borrow idx {}", cache.root_bank_cache[sol_index].borrow_index);
+        let msol = ac.get_native_deposit(&cache.root_bank_cache[msol_index], msol_index).unwrap();
+        let sol = ac.get_native_deposit(&cache.root_bank_cache[sol_index], sol_index).unwrap();
+        let msol_price = I80F48::from_bits((self.marinade_state.msol_price << 16) as i128);
+        msg!("msol balance {:?}", msol);
+        msg!("sol balance {:?}", sol);
+        msg!("net balance {:?}", msol.checked_mul(msol_price).unwrap().checked_sub(sol).unwrap());
         Ok(())
     }
 }
