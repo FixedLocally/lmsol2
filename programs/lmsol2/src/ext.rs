@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
-pub static MANGO_V3_ID: Pubkey = Pubkey::new_from_array([
+pub static MANGO_V3_ID: Pubkey = MANGO_V3_ID_MAINNET;
+pub static MANGO_V3_ID_MAINNET: Pubkey = Pubkey::new_from_array([
     11, 129, 136, 217, 110, 11, 207, 49, 238, 37, 70, 198, 50, 87, 144, 157, 211,
     141, 129, 216, 200, 164, 178, 213, 174, 41, 177, 146, 223, 8, 83, 37
 ]); // "mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68"
@@ -14,6 +15,6 @@ pub struct MangoV3;
 
 impl anchor_lang::Id for MangoV3 {
     fn id() -> Pubkey {
-        MANGO_V3_ID_DEVNET
+        MANGO_V3_ID
     }
 }

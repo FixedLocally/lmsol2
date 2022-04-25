@@ -21,4 +21,4 @@ overflow-checks = true
 [dependencies]
 anchor-lang = "0.24.2"
 anchor-spl = "0.24.2"
-# mango = {git = "https://github.com/blockworks-foundation/mango-v3", features = ["no_entrypoint"]}
+mango = {git = "https://github.com/blockworks-foundation/mango-v3", features = ["no-entrypoint"]}

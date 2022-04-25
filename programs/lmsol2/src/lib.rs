@@ -13,6 +13,7 @@ mod marinade;
 
 use ext::*;
 use state::*;
+use mango::state::{MangoAccount, MangoGroup, MAX_PAIRS};
 
 declare_id!("DZV3G6oZw2Qebc7QdcgbC59bKMaaLk9pnBZSXWpG64fd");
 
@@ -37,6 +38,14 @@ pub mod lmsol2 {
     pub fn kill_state(ctx: Context<KillState>) -> Result<()> {
         return ctx.accounts.process();
     }
+
+    pub fn read_mango_account(ctx: Context<ReadMangoAccount>) -> Result<()> {
+        return ctx.accounts.process();
+    }
+
+    pub fn deposit_tokens(ctx: Context<DepositTokens>, amount: u64) -> Result<()> {
+        return ctx.accounts.process(amount);
+    }
 }
 
 #[derive(Accounts)]
@@ -55,7 +64,7 @@ pub struct Initialize<'info> {
     lmsol_state: Box<Account<'info, LmSolState>>,
     sysvar_rent: Sysvar<'info, Rent>,
     /// CHECK: mango accounts are not anchor accounts
-    #[account(mut, owner = MANGO_V3_ID_DEVNET)]
+    #[account(mut, owner = MANGO_V3_ID)]
     mango_group: AccountInfo<'info>,
     /// CHECK: mango accounts are not anchor accounts
     #[account(mut)]
@@ -214,6 +223,146 @@ impl <'info>KillState<'info> {
         match mango_result  {
             Ok(_) => {},
             Err(e) => panic!("{}", e)
+        }
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct ReadMangoAccount<'info> {
+    /// CHECK: mango accounts are not anchor accounts
+    #[account(mut, owner = MANGO_V3_ID)]
+    mango_account: AccountInfo<'info>,
+    /// CHECK: mango accounts are not anchor accounts
+    #[account(mut, owner = MANGO_V3_ID)]
+    mango_group: AccountInfo<'info>,
+}
+
+impl <'info>ReadMangoAccount<'info> {
+    pub fn process(&self) -> Result<()> {
+        let mango_ac_result = MangoAccount::load_checked(&self.mango_account, &MANGO_V3_ID, &self.mango_group.key);
+        let mango_group_result = MangoGroup::load_checked(&self.mango_group, &MANGO_V3_ID);
+        match mango_ac_result {
+            Ok(_) => {}
+            Err(e) => {panic!("{}", e)}
+        }
+        match mango_group_result {
+            Ok(_) => {}
+            Err(e) => {panic!("{}", e)}
+        }
+        let ac = mango_ac_result.unwrap();
+        let group = mango_group_result.unwrap();
+
+        msg!("mango group {}", ac.mango_group);
+        msg!("mango deposits {:?}", ac.deposits);
+        msg!("mango borrows {:?}", ac.borrows);
+        for i in 0..MAX_PAIRS {
+            msg!("mango spot {:?}", group.spot_markets[i].spot_market);
+            msg!("mango perp {:?}", group.perp_markets[i].perp_market);
+        }
+        
+        Ok(())
+    }
+}
+
+/// deposit an amount of tokens into mango
+#[derive(Accounts)]
+pub struct DepositTokens<'info> {
+    #[account(mut)]
+    signer: Signer<'info>,
+    mango_program: Program<'info, MangoV3>,
+    token_program: Program<'info, Token>,
+    marinade_state: Box<Account<'info, State>>,
+    #[account(
+        seeds = [LmSolState::SEED], bump
+    )]
+    lmsol_state: Box<Account<'info, LmSolState>>,
+    // the mint is init'd at this point
+    #[account(seeds = [LmSolState::MINT_SEED], bump)]
+    lmsol_mint: Account<'info, Mint>,
+    /// CHECK: mango accounts are not anchor accounts
+    #[account(owner = MANGO_V3_ID)]
+    mango_group: AccountInfo<'info>,
+    /// CHECK: mango accounts are not anchor accounts
+    #[account(mut, owner = MANGO_V3_ID)]
+    mango_account: AccountInfo<'info>,
+    /// CHECK: mango accounts are not anchor accounts
+    #[account(mut, owner = MANGO_V3_ID)]
+    mango_cache: AccountInfo<'info>,
+    /// CHECK: mango accounts are not anchor accounts
+    #[account(mut, owner = MANGO_V3_ID)]
+    mango_root: AccountInfo<'info>,
+    /// CHECK: mango accounts are not anchor accounts
+    #[account(mut, owner = MANGO_V3_ID)]
+    mango_node: AccountInfo<'info>,
+    #[account(mut)]
+    bank_msol_ata: Account<'info, TokenAccount>,
+    #[account(mut)]
+    source_msol_ata: Account<'info, TokenAccount>,
+}
+
+impl <'info>DepositTokens<'info> {
+    pub fn process(&self, amount: u64) -> Result<()>{
+        msg!("depositing {}", amount);
+        // get mango account net lamports
+        // build approve ix - we need to approve lmsol state to transfer on the user's behalf
+        let approve_ctx = CpiContext::new(
+            self.token_program.to_account_infos()[0].clone(),
+            Approve {
+                authority: self.signer.to_account_infos()[0].clone(),
+                delegate: self.lmsol_state.to_account_infos()[0].clone(),
+                to: self.source_msol_ata.to_account_infos()[0].clone(),
+            },
+        );
+        let approve_result = approve(approve_ctx, amount);
+        match approve_result {
+            Ok(_) => {}
+            Err(e) => {panic!("{}", e)}
+        }
+        // build deposit ix
+        let deposit_ix = mango::instruction::deposit(
+            &self.mango_program.key(),
+            self.mango_group.key,
+            self.mango_account.key,
+            &self.lmsol_state.key(),
+            self.mango_cache.key,
+            self.mango_root.key,
+            self.mango_node.key,
+            &self.bank_msol_ata.key(),
+            &self.source_msol_ata.key(),
+            amount
+        )?;
+        let deposit_result = invoke_signed(
+            &deposit_ix,
+            &[
+                self.mango_program.to_account_infos()[0].clone(),
+                self.mango_group.clone(),
+                self.mango_account.clone(),
+                self.lmsol_state.to_account_infos()[0].clone(),
+                self.mango_cache.clone(),
+                self.mango_root.clone(),
+                self.mango_node.clone(),
+                self.bank_msol_ata.to_account_infos()[0].clone(),
+                self.source_msol_ata.to_account_infos()[0].clone(),
+            ],
+            &[&[LmSolState::SEED, &[self.lmsol_state.bump]]]
+        );
+        match deposit_result {
+            Ok(_) => {}
+            Err(e) => {panic!("{}", e)}
+        }
+        // build revoke ix - the state no longer need access to the user's funds
+        let revoke_ctx = CpiContext::new(
+            self.token_program.to_account_infos()[0].clone(),
+            Revoke {
+                authority: self.signer.to_account_infos()[0].clone(),
+                source: self.source_msol_ata.to_account_infos()[0].clone(),
+            },
+        );
+        let revoke_result = revoke(revoke_ctx);
+        match revoke_result {
+            Ok(_) => {}
+            Err(e) => {panic!("{}", e)}
         }
         Ok(())
     }
