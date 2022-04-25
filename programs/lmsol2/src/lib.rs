@@ -245,8 +245,31 @@ pub struct ReadMangoAccount<'info> {
 
 impl <'info>ReadMangoAccount<'info> {
     pub fn process(&self) -> Result<()> {
-        let mango_ac_result = MangoAccount::load_checked(&self.mango_account, &MANGO_V3_ID, &self.mango_group.key);
-        let mango_group_result = MangoGroup::load_checked(&self.mango_group, &MANGO_V3_ID);
+        let result = ReadMangoAccount::do_read(
+            self.marinade_state.clone(),
+            self.mango_account.clone(),
+            self.mango_group.clone(),
+            self.mango_cache.clone()
+        );
+        match result {
+            Ok(balances) => {
+                msg!("msol balance {:?}", balances.msol_deposit);
+                msg!("sol balance {:?}", balances.sol_borrow);
+                msg!("net balance {:?}", balances.net_lamports);
+                return Ok(());
+            },
+            Err(e) => {return Err(e);},
+        }
+    }
+
+    pub fn do_read(
+        marinade_state: Box<Account<'info, State>>,
+        mango_account: AccountInfo<'info>,
+        mango_group: AccountInfo<'info>,
+        mango_cache: AccountInfo<'info>
+    ) -> Result<Balances> {
+        let mango_ac_result = MangoAccount::load_checked(&mango_account, &MANGO_V3_ID, mango_group.key);
+        let mango_group_result = MangoGroup::load_checked(&mango_group, &MANGO_V3_ID);
         match mango_ac_result {
             Ok(_) => {}
             Err(e) => {panic!("{}", e)}
@@ -257,7 +280,7 @@ impl <'info>ReadMangoAccount<'info> {
         }
         let ac = mango_ac_result.unwrap();
         let group = mango_group_result.unwrap();
-        let cache_result = MangoCache::load_checked(&self.mango_cache, &MANGO_V3_ID, &group);
+        let cache_result = MangoCache::load_checked(&mango_cache, &MANGO_V3_ID, &group);
         match cache_result {
             Ok(_) => {}
             Err(e) => {panic!("{}", e)}
@@ -266,18 +289,21 @@ impl <'info>ReadMangoAccount<'info> {
 
         let msol_index = group.find_token_index(&MSOL_MINT).unwrap();
         let sol_index = group.find_token_index(&SOL_MINT).unwrap();
-        msg!("mango group {}", ac.mango_group);
-        msg!("mango deposits {:?} mSOL", ac.deposits[msol_index]);
-        msg!("mango borrows {:?} SOL", ac.borrows[sol_index]);
-        msg!("msol deposit idx {}", cache.root_bank_cache[msol_index].deposit_index);
-        msg!("sol borrow idx {}", cache.root_bank_cache[sol_index].borrow_index);
+        // msg!("mango group {}", ac.mango_group);
+        // msg!("mango deposits {:?} mSOL", ac.deposits[msol_index]);
+        // msg!("mango borrows {:?} SOL", ac.borrows[sol_index]);
+        // msg!("msol deposit idx {}", cache.root_bank_cache[msol_index].deposit_index);
+        // msg!("sol borrow idx {}", cache.root_bank_cache[sol_index].borrow_index);
         let msol = ac.get_native_deposit(&cache.root_bank_cache[msol_index], msol_index).unwrap();
-        let sol = ac.get_native_deposit(&cache.root_bank_cache[sol_index], sol_index).unwrap();
-        let msol_price = I80F48::from_bits((self.marinade_state.msol_price << 16) as i128);
-        msg!("msol balance {:?}", msol);
-        msg!("sol balance {:?}", sol);
-        msg!("net balance {:?}", msol.checked_mul(msol_price).unwrap().checked_sub(sol).unwrap());
-        Ok(())
+        let sol = ac.get_native_borrow(&cache.root_bank_cache[sol_index], sol_index).unwrap();
+        let msol_price = I80F48::from_bits((marinade_state.msol_price as i128) << 16);
+        let lamports = msol.checked_mul(msol_price).unwrap().checked_sub(sol).unwrap();
+        Ok(Balances {
+            msol_deposit: msol,
+            sol_borrow: sol,
+            net_lamports: lamports,
+            msol_price,
+        })
     }
 }
 
@@ -294,7 +320,7 @@ pub struct DepositTokens<'info> {
     )]
     lmsol_state: Box<Account<'info, LmSolState>>,
     // the mint is init'd at this point
-    #[account(seeds = [LmSolState::MINT_SEED], bump)]
+    #[account(mut, seeds = [LmSolState::MINT_SEED], bump)]
     lmsol_mint: Account<'info, Mint>,
     /// CHECK: mango accounts are not anchor accounts
     #[account(owner = MANGO_V3_ID)]
@@ -315,6 +341,8 @@ pub struct DepositTokens<'info> {
     bank_msol_ata: Account<'info, TokenAccount>,
     #[account(mut)]
     source_msol_ata: Account<'info, TokenAccount>,
+    #[account(mut)]
+    dest_lmsol_ata: Account<'info, TokenAccount>,
 }
 
 impl <'info>DepositTokens<'info> {
@@ -380,8 +408,57 @@ impl <'info>DepositTokens<'info> {
             Ok(_) => {}
             Err(e) => {panic!("{}", e)}
         }
+
+        // read mango ac and figure out how much the deposit was
+        let post_balances = ReadMangoAccount::do_read(
+            self.marinade_state.clone(),
+            self.mango_account.clone(),
+            self.mango_group.clone(),
+            self.mango_cache.clone()
+        )?;
+        msg!("mSOL price {}", post_balances.msol_price);
+        msg!("deposit amount {}", amount);
+        let deposit_size = I80F48::from_bits((amount as i128) << 48).checked_mul(post_balances.msol_price).unwrap();
+        let lamports_before = post_balances.net_lamports.checked_sub(deposit_size).unwrap();
+        // msg!("balance before {}", lamports_before);
+        // msg!("balance after {}", post_balances.net_lamports);
+        msg!("deposit size {}", deposit_size);
+
+        // mint shares to user
+        let lmsol_supply = self.lmsol_mint.supply;
+        let lmsol_index = if lmsol_supply == 0 {
+            I80F48::from_bits(1i128 << 48)
+        } else {
+            lamports_before.checked_div(I80F48::from_bits((lmsol_supply as i128) << 48)).unwrap()
+        };
+        // msg!("supply before {}", lmsol_supply);
+        msg!("lmsol index {}", lmsol_index);
+        let shares = deposit_size.checked_div(lmsol_index).unwrap().floor().to_num::<u64>();
+        msg!("issue shares {}", shares);
+        let seeds: &[&[&[u8]]] = &[&[LmSolState::SEED, &[self.lmsol_state.bump]]];
+        let mint_ctx = CpiContext::new_with_signer(
+            self.token_program.to_account_infos()[0].clone(),
+            MintTo {
+                authority: self.lmsol_state.to_account_infos()[0].clone(),
+                mint: self.lmsol_mint.to_account_infos()[0].clone(),
+                to: self.dest_lmsol_ata.to_account_infos()[0].clone(),
+            },
+            seeds,
+        );
+        let mint_result = mint_to(mint_ctx, shares);
+        match mint_result {
+            Ok(_) => {}
+            Err(e) => {panic!("{}", e)}
+        }
         Ok(())
     }
+}
+
+pub struct Balances {
+    pub msol_deposit: I80F48,
+    pub sol_borrow: I80F48,
+    pub net_lamports: I80F48,
+    pub msol_price: I80F48,
 }
 
 #[error_code]
