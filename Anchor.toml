@@ -12,3 +12,38 @@ wallet = "/Users/apple/.config/solana/id.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test.validator]
+url = "https://api.mainnet-beta.solana.com"     # This is the url of the cluster that accounts are cloned from (See `test.validator.clone`).
+warp_slot = "131256196"                         # Warp the ledger to `warp_slot` after starting the validator. 
+rpc_port = 1337                                 # Set JSON RPC on this port, and the next port for the RPC websocket.
+limit_ledger_size = "100000"                    # Keep this amount of shreds in root slots.
+ledger = "test-ledger"                          # Set ledger location.
+gossip_port = 1337                              # Gossip port number for the validator.
+gossip_host = "127.0.0.1"                       # Gossip DNS name or IP address for the validator to advertise in gossip.
+faucet_sol = "100000000"                        # Give the faucet address this much SOL in genesis.
+faucet_port = 1337                              # Enable the faucet on this port.
+dynamic_port_range = "1337-13337"             # Range to use for dynamically assigned ports.
+bind_address = "0.0.0.0"                        # IP address to bind the validator ports.
+
+[[test.validator.clone]]
+address = "MarBmsSgKXdrN1egZf5sqe1TMai9K1rChYNDJgjq7aD"   # marinade program
+[[test.validator.clone]]
+address = "8szGkuLTAux9XMgZ2vtY39jVSowEcpBfFfD8hXSEqdGC"  # marinade state
+[[test.validator.clone]]
+address = "mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68"   # mango v3
+[[test.validator.clone]]
+address = "98pjRuQjK3qA6gXts96PqZT4Ze5QmnCmt3QYjhbUSPue"  # mango group
+[[test.validator.clone]]
+address = "EBDRoayCDDUvDgCimta45ajQeXbexv7aKqJubruqpyvu"  # mango cache
+[[test.validator.clone]]
+address = "5AWnWCNKSzdpgyJSD3NWdarMazCGX2t8D4NU5xwSEVjC"  # mango msol root
+[[test.validator.clone]]
+address = "H9jHd5YsHN4fg17aqng2WzJGTyinMDyQ2jin3iuiXPVD"  # mango msol node
+[[test.validator.clone]]
+address = "5v7hcK6qrU7NFbbXdNGjTjc89m4tNDyEYCW5BPhWr1Da"  # mango bank msol ata
+[[test.validator.clone]]
+address = "4wnRjSViQfMQeMsdC3B1MrCuEZ5bMqeRRrdVKvLrBQi4"  # self msol ata
+[[test.validator.clone]]
+address = "9JmvkvZYc8RR1Y9Vpjsr3JXVkWvJP2ZxvR12mEQWVuyy"  # own address
+

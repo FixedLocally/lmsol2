@@ -49,8 +49,8 @@ pub mod lmsol2 {
     }
 }
 
+/// initialise new vault
 #[derive(Accounts)]
-// #[instruction(bump: u8)]
 pub struct Initialize<'info> {
     #[account(mut)]
     signer: Signer<'info>,
@@ -170,6 +170,7 @@ impl <'info>Initialize<'info> {
     }
 }
 
+/// kills vault and reclaim the mango and vault accounts
 #[derive(Accounts)]
 pub struct KillState<'info> {
     signer: Signer<'info>,
@@ -229,6 +230,7 @@ impl <'info>KillState<'info> {
     }
 }
 
+/// read deposit info, useful with simulation
 #[derive(Accounts)]
 pub struct ReadMangoAccount<'info> {
     marinade_state: Box<Account<'info, State>>,
@@ -307,7 +309,7 @@ impl <'info>ReadMangoAccount<'info> {
     }
 }
 
-/// deposit an amount of tokens into mango
+/// deposit an amount of tokens into mango and mint shares
 #[derive(Accounts)]
 pub struct DepositTokens<'info> {
     #[account(mut)]
